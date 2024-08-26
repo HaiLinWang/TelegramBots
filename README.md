@@ -18,6 +18,7 @@ TelegramBots机器人，目前只实现了贴纸下载和转换。文件转换�
 - ffmpeg
 - 本机部署
 - f5启动
+- 需要安装ffmpeg。 官网地址https://www.ffmpeg.org/
 
 ## 安装步骤
 
