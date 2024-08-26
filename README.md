@@ -1,0 +1,2 @@
+# TelegramBots
+TelegramBots机器人，目前只实现了贴纸下载和转换。文件转换需要使用FFmpeg
