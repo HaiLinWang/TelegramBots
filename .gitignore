@@ -1,1 +1,3 @@
-/TelegramBots/TelegramBots.csproj
+.idea/
+/TelegramBots/TelegramBots/bin
+/TelegramBots/TelegramBots/obj
