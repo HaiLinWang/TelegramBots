@@ -36,7 +36,7 @@ namespace TelegramBots.Framework.Extensions
             builder.Services.AddHttpClient();
             // 注册 ITelegramBotService
             builder.Services.AddSingleton<ITelegramBotService, TelegramBotService>();
-            builder.Services.AddTransient<IStickerDownloaderService, StickerDownloaderService>();
+            // builder.Services.AddTransient<IStickerDownloaderService, StickerDownloaderService>();
             builder.Services.AddScoped<FormatConvert>();
             return builder;
         }
@@ -95,15 +95,24 @@ namespace TelegramBots.Framework.Extensions
         public static async Task ValidateStickerDownloaderAsync(this IServiceProvider serviceProvider)
         {
             using var scope = serviceProvider.CreateScope();
-            var stickerDownloader = scope.ServiceProvider.GetRequiredService<IStickerDownloaderService>();
-            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            // var stickerDownloader = scope.ServiceProvider.GetRequiredService<IStickerDownloaderService>();
+            var _appSettings = scope.ServiceProvider.GetRequiredService<IOptions<AppSettings>>();
+            var _logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
             try
             {
-                await stickerDownloader.InitializeAsync();
+                if (!Directory.Exists(_appSettings.Value.DownloadPath))
+                {
+                    Directory.CreateDirectory(_appSettings.Value.DownloadPath);
+                    _logger.LogInformation($"成功创建下载文件夹：{_appSettings.Value.DownloadPath}");
+                }
+                else
+                {
+                    _logger.LogInformation($"下载文件夹已存在：{_appSettings.Value.DownloadPath}");
+                }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "StickerDownloader 初始化失败");
+                _logger.LogError(ex, "Dir 初始化失败");
             }
         }
     }

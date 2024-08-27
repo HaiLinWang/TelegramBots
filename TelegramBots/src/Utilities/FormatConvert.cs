@@ -14,7 +14,7 @@ public class FormatConvert
     public FormatConvert(ILogger<FormatConvert> logger)
     {
         _logger = logger;
-        _processorCount = Environment.ProcessorCount ;
+        _processorCount = Environment.ProcessorCount;
     }
 
     // 处理根目录下所有webm文件夹的方法
@@ -42,11 +42,15 @@ public class FormatConvert
         }));
     }
 
-    // 处理单个webm文件夹中所有webm文件的方法
-    public async Task ProcessConvertFilesAsync(string folder)
+    /// <summary>
+    /// 转换文件 
+    /// </summary>
+    /// <param name="folder"></param>
+    /// <param name="type">0文件夹，1单个文件</param>
+    public async Task ProcessConvertFilesAsync(string folder, int type = 0)
     {
         // 创建对应的gif文件夹
-        string gifFolder = Path.Combine(Path.GetDirectoryName(folder), "gif");
+        string gifFolder = Path.Combine(Path.GetDirectoryName(folder), "gifs");
         // 如果 gif 文件夹不存在，则创建
         if (!Directory.Exists(gifFolder))
         {
@@ -54,20 +58,27 @@ public class FormatConvert
             _logger.LogInformation($"已创建 GIF 文件夹: {gifFolder}");
         }
 
-        // 获取文件夹中的所有文件
-        string[] allFiles = Directory.GetFiles(folder);
-        _logger.LogInformation($"在 {folder} 中找到文件总数：{allFiles.Length}");
-        if (allFiles.Length == 0)
+        List<string> allFiles = new List<string>();
+        if (type == 0)
+        {
+            // 获取文件夹中的所有文件
+            allFiles = Directory.GetFiles(folder).ToList();
+            _logger.LogInformation($"在 {folder} 中找到文件总数：{allFiles.Count}");
+        }
+        else
+        {
+            allFiles.Add(folder);
+        }
+        
+        if (!allFiles.Any())
         {
             _logger.LogInformation($"在 {folder} 中没有找到任何文件。");
             return;
         }
-
         // 按文件扩展名分组并计数
         var fileGroups = allFiles
             .GroupBy(file => Path.GetExtension(file).ToLowerInvariant())
             .OrderByDescending(g => g.Count());
-
         _logger.LogInformation("文件类型统计：");
         foreach (var group in fileGroups)
         {
