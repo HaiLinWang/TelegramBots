@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
 namespace TelegramBots.Utilities;
@@ -6,15 +7,18 @@ namespace TelegramBots.Utilities;
 public class FormatConvert
 {
     private readonly ILogger<FormatConvert> _logger;
+
     // 获取 CPU 核心数，并除以2以避免过度使用系统资源
     private readonly int _processorCount;
+
     public FormatConvert(ILogger<FormatConvert> logger)
     {
         _logger = logger;
-        _processorCount = Environment.ProcessorCount / 2;
+        _processorCount = Environment.ProcessorCount ;
     }
+
     // 处理根目录下所有webm文件夹的方法
-    public  async Task ProcessWebmFoldersAsync(string rootPath)
+    public async Task ProcessWebmFoldersAsync(string rootPath)
     {
         // 获取所有包含webm子文件夹的目录
         var directories = Directory.GetDirectories(rootPath)
@@ -39,7 +43,7 @@ public class FormatConvert
     }
 
     // 处理单个webm文件夹中所有webm文件的方法
-    public  async Task ProcessConvertFilesAsync(string folder)
+    public async Task ProcessConvertFilesAsync(string folder)
     {
         // 创建对应的gif文件夹
         string gifFolder = Path.Combine(Path.GetDirectoryName(folder), "gif");
@@ -49,6 +53,7 @@ public class FormatConvert
             Directory.CreateDirectory(gifFolder);
             _logger.LogInformation($"已创建 GIF 文件夹: {gifFolder}");
         }
+
         // 获取文件夹中的所有文件
         string[] allFiles = Directory.GetFiles(folder);
         _logger.LogInformation($"在 {folder} 中找到文件总数：{allFiles.Length}");
@@ -57,6 +62,7 @@ public class FormatConvert
             _logger.LogInformation($"在 {folder} 中没有找到任何文件。");
             return;
         }
+
         // 按文件扩展名分组并计数
         var fileGroups = allFiles
             .GroupBy(file => Path.GetExtension(file).ToLowerInvariant())
@@ -94,13 +100,27 @@ public class FormatConvert
     }
 
     // 将单个webm文件转换为gif的方法
-     async Task ConvertWebmToGifAsync(string inputFile, string outputFile)
+    async Task ConvertWebmToGifAsync(string inputFile, string outputFile)
     {
-        string ffmpegPath = "/usr/local/bin/ffmpeg";
+        string ffmpegPath;
 
-        // ffmpeg命令参数，限制最大帧率为60
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            ffmpegPath = @"D:\Program Files\ffmpeg-7.0.2-essentials_build\bin\ffmpeg.exe";
+            // 替换为 Windows 上的 ffmpeg 路径
+        }
+        else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            ffmpegPath = "/usr/local/bin/ffmpeg"; // macOS 上的 ffmpeg 路径
+        }
+        else
+        {
+            throw new PlatformNotSupportedException("不支持的操作系统");
+        }
+
         string arguments =
-            $"-y -i \"{inputFile}\" -vf \"fps=fps=60:round=up,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{outputFile}\"";
+            $"-y -i \"{inputFile}\" -vf \"fps=fps=60:round=up,scale='min(320,iw)':'-1':flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{outputFile}\"";
+
         ProcessStartInfo startInfo = new ProcessStartInfo
         {
             FileName = ffmpegPath,

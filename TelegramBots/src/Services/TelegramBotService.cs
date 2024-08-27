@@ -165,6 +165,7 @@ public class TelegramBotService : ITelegramBotService
             new[]
             {
                 InlineKeyboardButton.WithCallbackData("贴纸转换", "sticker_conversion"),
+                InlineKeyboardButton.WithCallbackData("Gif下载", "gif_conversion"),
                 InlineKeyboardButton.WithCallbackData("测试按钮", "test_button"),
                 // 可以添加更多按钮
             }
@@ -194,6 +195,10 @@ public class TelegramBotService : ITelegramBotService
             case "test_button":
                 _userStates[chatId] = "waiting_test_button";
                 await _botClient.SendTextMessageAsync(chatId, "我只是个测试按钮。", cancellationToken: cancellationToken);
+                break;
+            case "gif_conversion":
+                _userStates[chatId] = "waiting_gif_conversion";
+                await _botClient.SendTextMessageAsync(chatId, "请发送GIF图片。", cancellationToken: cancellationToken);
                 break;
             // 可以在这里添加其他菜单选项的处理
             default:
