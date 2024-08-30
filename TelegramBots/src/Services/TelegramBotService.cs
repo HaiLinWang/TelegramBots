@@ -1,13 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
-using FluentResults;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Caching.Redis;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
-using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
@@ -30,19 +27,24 @@ public class TelegramBotService : ITelegramBotService
 {
     private readonly ITelegramBotClient _botClient;
     private readonly ILogger<TelegramBotService> _logger;
+
     private readonly AppSettings _settings;
+
     // private readonly IDownloaderService _downloaderService;
     private readonly FormatConvert _formatConvert;
-    private ConcurrentDictionary<long, string> _userStates = new();
+    private readonly IZipSplitterHelper _splitterHelper;
+    private const string UserStatePrefix = "user_state:";
+    private static readonly TimeSpan DefaultExpiry = TimeSpan.FromDays(1);
 
     public TelegramBotService(ILogger<TelegramBotService> logger, IOptions<AppSettings> options,
         ITelegramBotClient botClient,
-         FormatConvert formatConvert)
+        FormatConvert formatConvert, IZipSplitterHelper splitterHelper)
     {
         _botClient = botClient;
         _logger = logger;
         _settings = options.Value;
         _formatConvert = formatConvert;
+        _splitterHelper = splitterHelper;
     }
 
 
@@ -65,32 +67,35 @@ public class TelegramBotService : ITelegramBotService
     {
         var chatId = message.Chat.Id;
         _logger.LogInformation($"接收用户发送信息");
+        var state = string.Empty;
         // 处理文本消息
         if (message.Text is { } messageText)
         {
-        // 处理其他命令
+            // 处理其他命令
             if (messageText.StartsWith("/"))
             {
                 await HandleCommandAsync(chatId, messageText, cancellationToken);
                 return;
             }
 
+            state = await RedisHelper.GetAsync($"{UserStatePrefix}{chatId}");
             // 处理贴纸转换
-            if (_userStates.TryGetValue(chatId, out var state) && state == "waiting_for_sticker_link")
+            if (state == "waiting_for_sticker_link")
             {
                 await HandleStickerConversionAsync(chatId, messageText, cancellationToken);
                 return;
             }
 
-            if (_userStates.TryGetValue(chatId, out var test) && test == "waiting_test_button")
+            if (state == "waiting_test_button")
             {
-                _userStates.TryRemove(chatId, out _);
+                await RemoveUserStateAsync(chatId);
                 return;
             }
         }
 
+        state = await RedisHelper.GetAsync($"{UserStatePrefix}{chatId}");
         // 处理图片下载
-        if (_userStates.TryGetValue(chatId, out var downloadState) && downloadState == "waiting_download_button")
+        if (state == "waiting_download_button")
         {
             if (message.Photo != null || message.Document != null)
             {
@@ -124,7 +129,7 @@ public class TelegramBotService : ITelegramBotService
                 break;
         }
 
-        _userStates = new ConcurrentDictionary<long, string>();
+        await RemoveUserStateAsync(chatId);
     }
 
     private async Task ShowWelcomeMessageAsync(long chatId, CancellationToken cancellationToken)
@@ -175,7 +180,7 @@ public class TelegramBotService : ITelegramBotService
 
     private async Task ShowMainMenuAsync(long chatId, CancellationToken cancellationToken)
     {
-        _userStates = new ConcurrentDictionary<long, string>();
+        await RemoveUserStateAsync(chatId);
         var keyboard = new InlineKeyboardMarkup(new[]
         {
             new[]
@@ -205,15 +210,15 @@ public class TelegramBotService : ITelegramBotService
         switch (callbackQuery.Data)
         {
             case "sticker_conversion":
-                _userStates[chatId] = "waiting_for_sticker_link";
+                await SetUserStateAsync(chatId, "waiting_for_sticker_link");
                 await _botClient.SendTextMessageAsync(chatId, "请发送贴纸链接。", cancellationToken: cancellationToken);
                 break;
             case "test_button":
-                _userStates[chatId] = "waiting_test_button";
+                await SetUserStateAsync(chatId, "waiting_test_button");
                 await _botClient.SendTextMessageAsync(chatId, "我只是个测试按钮。", cancellationToken: cancellationToken);
                 break;
             case "download_button":
-                _userStates[chatId] = "waiting_download_button";
+                await SetUserStateAsync(chatId, "waiting_download_button");
                 await _botClient.SendTextMessageAsync(chatId, "请发送图片。", cancellationToken: cancellationToken);
                 break;
             // 可以在这里添加其他菜单选项的处理
@@ -235,13 +240,14 @@ public class TelegramBotService : ITelegramBotService
             string fileId = null;
             string fileName = null;
             // 创建对应的gif文件夹
-            string dirFolder = Path.Combine(_settings.DownloadPath, "downLoadFiles");
+            var dirFolder = Path.Combine(_settings.DownloadPath, "downLoadFiles");
             // 如果 gif 文件夹不存在，则创建
             if (!Directory.Exists(dirFolder))
             {
                 Directory.CreateDirectory(dirFolder);
                 _logger.LogInformation($"已创建 GIF 文件夹: {dirFolder}");
             }
+
             if (message.Photo != null && message.Photo.Length > 0)
             {
                 // 获取最大尺寸的图片
@@ -252,9 +258,9 @@ public class TelegramBotService : ITelegramBotService
             else if (message.Document != null)
             {
                 fileId = message.Document.FileId;
-                string originalFileName = message.Document.FileName ?? $"document_{DateTime.Now:yyyyMMddHHmmss}";
-                string fileExtension = Path.GetExtension(originalFileName);
-                string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(originalFileName);
+                var originalFileName = message.Document.FileName ?? $"document_{DateTime.Now:yyyyMMddHHmmss}";
+                var fileExtension = Path.GetExtension(originalFileName);
+                var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(originalFileName);
                 // 组合文件名和文件ID
                 fileName = $"{fileNameWithoutExtension}_{fileId}{fileExtension}";
             }
@@ -262,7 +268,7 @@ public class TelegramBotService : ITelegramBotService
             if (fileId != null)
             {
                 var file = await _botClient.GetFileAsync(fileId, cancellationToken);
-                string filePath = $"{dirFolder}/{fileName}";
+                var filePath = $"{dirFolder}/{fileName}";
                 if (!File.Exists(filePath))
                 {
                     using (var saveImageStream = System.IO.File.Open(filePath, FileMode.Create))
@@ -270,8 +276,9 @@ public class TelegramBotService : ITelegramBotService
                         await _botClient.DownloadFileAsync(file.FilePath, saveImageStream, cancellationToken);
                     }
                 }
+
                 // 进行文件转换
-                await _formatConvert.ProcessConvertFilesAsync(filePath,1);
+                await _formatConvert.ProcessConvertFilesAsync(filePath, 1);
                 await _botClient.SendTextMessageAsync(chatId, $"文件已成功下载并转换: {fileName}",
                     cancellationToken: cancellationToken);
             }
@@ -294,20 +301,21 @@ public class TelegramBotService : ITelegramBotService
         try
         {
             // 验证链接格式
-            if (!Uri.TryCreate(stickerLink, UriKind.Absolute, out Uri uri) ||
+            if (!Uri.TryCreate(stickerLink, UriKind.Absolute, out var uri) ||
                 (!uri.Host.Contains("telegram.me") && !uri.Host.Contains("t.me")))
             {
                 await _botClient.SendTextMessageAsync(chatId, "请提供有效的 Telegram 贴纸链接。",
                     cancellationToken: cancellationToken);
                 return;
             }
+
             // 发送"处理中"消息
             await _botClient.SendTextMessageAsync(chatId, "正在处理贴纸集，请稍候...", cancellationToken: cancellationToken);
             // 从链接中提取贴纸集名称
-            string stickerSetName = uri.Segments.Last().TrimEnd('/');
+            var stickerSetName = uri.Segments.Last().TrimEnd('/');
             // 获取贴纸集信息
             var stickerSet = await _botClient.GetStickerSetAsync(stickerSetName, cancellationToken);
-            int stickerCount = stickerSet.Stickers.Length;
+            var stickerCount = stickerSet.Stickers.Length;
             // 设置保存路径
             var swd = Path.Combine(_settings.DownloadPath, stickerSetName);
             var originalFileDir = Path.Combine(swd, "originalFiles");
@@ -316,9 +324,9 @@ public class TelegramBotService : ITelegramBotService
                 cancellationToken: cancellationToken);
             var semaphore = new SemaphoreSlim(_settings.DownloaderThreads);
             var tasks = new List<Task>();
-            int downloadedCount = 0;
-            int processedCount = 0;
-            for (int i = 0; i < stickerCount; i++)
+            var downloadedCount = 0;
+            var processedCount = 0;
+            for (var i = 0; i < stickerCount; i++)
             {
                 var sticker = stickerSet.Stickers[i];
                 var index = i;
@@ -328,28 +336,31 @@ public class TelegramBotService : ITelegramBotService
                     try
                     {
                         var file = await _botClient.GetFileAsync(sticker.FileId, cancellationToken);
-                        string fileExtension = sticker.IsAnimated ? "tgs" : (sticker.IsVideo ? "webm" : "webp");
-                        string fileName = $"sticker_{index + 1}_{sticker.Emoji}.{fileExtension}";
-                        string filePath = Path.Combine(originalFileDir, fileName);
-                        bool downloaded = false;
+                        var fileExtension = sticker.IsAnimated ? "tgs" : (sticker.IsVideo ? "webm" : "webp");
+                        var fileName = $"sticker_{index + 1}_{sticker.Emoji}.{fileExtension}";
+                        var filePath = Path.Combine(originalFileDir, fileName);
+                        var downloaded = false;
                         if (!File.Exists(filePath))
                         {
                             using (var fileStream = new FileStream(filePath, FileMode.Create))
                             {
                                 await _botClient.DownloadFileAsync(file.FilePath, fileStream, cancellationToken);
                             }
+
                             downloaded = true;
                         }
+
                         Interlocked.Increment(ref processedCount);
                         if (downloaded)
                         {
                             Interlocked.Increment(ref downloadedCount);
                         }
-                        // 每处理5个贴纸或处理完最后一个贴纸时，更新进度
-                        if (processedCount % 5 == 0 || processedCount == stickerCount)
+
+                        // 每处理10个贴纸或处理完最后一个贴纸时，更新进度
+                        if (processedCount % 10 == 0 || processedCount == stickerCount)
                         {
-                            await _botClient.SendTextMessageAsync(chatId, 
-                                $"已处理 {processedCount} 个贴纸，下载 {downloadedCount} 个，共 {stickerCount} 个...", 
+                            await _botClient.SendTextMessageAsync(chatId,
+                                $"已处理 {processedCount} 个贴纸，下载 {downloadedCount} 个，共 {stickerCount} 个...",
                                 cancellationToken: cancellationToken);
                         }
                     }
@@ -360,18 +371,43 @@ public class TelegramBotService : ITelegramBotService
                 });
                 tasks.Add(task);
             }
+
             // 等待所有任务完成
             await Task.WhenAll(tasks);
             // 提示用户下载完成
-            await _botClient.SendTextMessageAsync(chatId, 
-                $"贴纸集 '{stickerSetName}' 开始转换gif格式到 gifs 文件夹。\n" , 
+            await _botClient.SendTextMessageAsync(chatId,
+                $"贴纸集 '{stickerSetName}' 开始转换gif。\n",
                 cancellationToken: cancellationToken);
             // 进行文件转换
-            await _formatConvert.ProcessConvertFilesAsync(originalFileDir);
+            var gifsPath = await _formatConvert.ProcessConvertFilesAsync(originalFileDir);
             // 提示用户下载完成
-            await _botClient.SendTextMessageAsync(chatId, 
-                $"贴纸集 '{stickerSetName}' 已成功处理。新下载并转换 {downloadedCount} 个贴纸到 {swd} 文件夹。\n" +
-                "您可以继续发送其他贴纸链接，或者输入 /end 来结束。", 
+            await _botClient.SendTextMessageAsync(chatId,
+                $"贴纸集 '{stickerSetName}' 已成功处理。新下载并转换 {downloadedCount} 个贴纸到 {swd} 文件夹。开始压缩上传ZIP",
+                cancellationToken: cancellationToken);
+            if (!string.IsNullOrWhiteSpace(gifsPath))
+            {
+                //进行zip分包压缩
+                try
+                {
+                    var createdZipFiles = await _splitterHelper.SplitAndZipFolderAsync(gifsPath,
+                        Path.GetDirectoryName(gifsPath), stickerSetName);
+                    _logger.LogInformation($"文件夹分包完成，共创建 {createdZipFiles.Count} 个ZIP包");
+                    // 发送分包后的文件到 Telegram
+                    foreach (string zipFile in createdZipFiles)
+                    {
+                        await SendFileToTelegramAsync(chatId, zipFile);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "分包过程中发生错误");
+                }
+            }
+
+            // 提示用户下载完成
+            await _botClient.SendTextMessageAsync(chatId,
+                $"贴纸集 '{stickerSetName}' 已成功处理。请点击DownLoad进行下载\n" +
+                "您可以继续发送其他贴纸链接，或者输入 /end 来结束。",
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
@@ -382,6 +418,35 @@ public class TelegramBotService : ITelegramBotService
         }
     }
 
+    private async Task SendFileToTelegramAsync(long chatId, string filePath)
+    {
+        try
+        {
+            var fileName = Path.GetFileName(filePath);
+            var fileId = await RedisHelper.GetAsync($"{fileName}_Document");
+            if (string.IsNullOrWhiteSpace(fileId))
+            {
+                using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    var message = await _botClient.SendDocumentAsync(
+                        chatId: chatId,
+                        document: new InputFileStream(fileStream, fileName),
+                        caption: $"Sending file: {fileName}"
+                    );
+                    await RedisHelper.SetAsync($"{fileName}_Document", message.Document.FileId,DefaultExpiry);
+                }
+            }
+            else
+            {
+                var message = await _botClient.SendDocumentAsync(chatId,fileId);
+            }
+            _logger.LogInformation($"成功发送文件: {filePath}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"发送文件 {filePath} 到 Telegram 时发生错误");
+        }
+    }
 
     // 处理轮询错误
     public Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception,
@@ -398,8 +463,9 @@ public class TelegramBotService : ITelegramBotService
         return Task.CompletedTask;
     }
 
-    #region  下载贴纸http请求方法
-   // // 贴纸转换
+    #region 下载贴纸http请求方法
+
+    // // 贴纸转换
     // private async Task HandleStickerConversionAsync(long chatId, string messageText,
     //     CancellationToken cancellationToken)
     // {
@@ -479,8 +545,16 @@ public class TelegramBotService : ITelegramBotService
     //
     //     await _botClient.SendTextMessageAsync(chatId, "贴纸转换完成。", cancellationToken: cancellationToken);
     // }
+    private async Task SetUserStateAsync(long chatId, string state)
+    {
+        await RedisHelper.SetAsync($"{UserStatePrefix}{chatId}", state, DefaultExpiry);
+    }
 
- 
+    private async Task RemoveUserStateAsync(long chatId)
+    {
+        await RedisHelper.DelAsync($"{UserStatePrefix}{chatId}");
+    }
+
     private bool IsValidStickerLink(string link)
     {
         // 这个正则表达式匹配 Telegram 贴纸链接的格式
@@ -488,5 +562,6 @@ public class TelegramBotService : ITelegramBotService
         var regex = new Regex(@"^https?:\/\/t\.me\/addstickers\/[a-zA-Z0-9_]+$");
         return regex.IsMatch(link);
     }
+
     #endregion
 }

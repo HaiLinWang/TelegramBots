@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Redis;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -36,6 +38,8 @@ namespace TelegramBots.Framework.Extensions
             builder.Services.AddHttpClient();
             // 注册 ITelegramBotService
             builder.Services.AddSingleton<ITelegramBotService, TelegramBotService>();
+            builder.Services.AddSingleton<IZipSplitterHelper, ZipSplitterHelper>();
+            // builder.Services.AddSingleton<IDistributedCache>(new Microsoft.Extensions.Caching.Redis.CSRedisCache(RedisHelper.Instance));
             // builder.Services.AddTransient<IStickerDownloaderService, StickerDownloaderService>();
             builder.Services.AddScoped<FormatConvert>();
             return builder;
@@ -78,7 +82,6 @@ namespace TelegramBots.Framework.Extensions
             {
                 builder.Services.AddSingleton(type);
             }
-
             return builder;
         }
 
@@ -92,27 +95,27 @@ namespace TelegramBots.Framework.Extensions
             return builder;
         }
 
-        public static async Task ValidateStickerDownloaderAsync(this IServiceProvider serviceProvider)
+        public static async Task InitializeAsync(this IServiceProvider serviceProvider)
         {
             using var scope = serviceProvider.CreateScope();
-            // var stickerDownloader = scope.ServiceProvider.GetRequiredService<IStickerDownloaderService>();
-            var _appSettings = scope.ServiceProvider.GetRequiredService<IOptions<AppSettings>>();
+            var _appSettings = scope.ServiceProvider.GetRequiredService<IOptions<AppSettings>>().Value;
             var _logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
             try
             {
-                if (!Directory.Exists(_appSettings.Value.DownloadPath))
+                if (!Directory.Exists(_appSettings.DownloadPath))
                 {
-                    Directory.CreateDirectory(_appSettings.Value.DownloadPath);
-                    _logger.LogInformation($"成功创建下载文件夹：{_appSettings.Value.DownloadPath}");
+                    Directory.CreateDirectory(_appSettings.DownloadPath);
+                    _logger.LogInformation($"成功创建下载文件夹：{_appSettings.DownloadPath}");
                 }
-                else
-                {
-                    _logger.LogInformation($"下载文件夹已存在：{_appSettings.Value.DownloadPath}");
-                }
+                _logger.LogInformation($"文件夹路径：{_appSettings.DownloadPath}");
+                var csRedis = new CSRedis.CSRedisClient(_appSettings.Redis.ConnectionString, _appSettings.Redis.SentinelEndpoints);
+                RedisHelper.Initialization(csRedis);
+                _logger.LogInformation($"注入Redis");
+              
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Dir 初始化失败");
+                _logger.LogError(ex, "初始化失败");
             }
         }
     }

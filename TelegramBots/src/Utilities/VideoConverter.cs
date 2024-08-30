@@ -34,7 +34,7 @@ public class VideoConverter
             VideoCodec =VideoCodec.gif,
         };
 
-        string filterComplex = $"fps={fps},scale={width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse";
+        var filterComplex = $"fps={fps},scale={width}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse";
         try
         {
             await ffmpeg.ConvertAsync(inputFile, outputFile, conversionOptions, CancellationToken.None);

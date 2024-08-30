@@ -12,12 +12,12 @@ public static class EmojiHelper
             return "unknown";
         }
         var parts = new HashSet<string>();
-        for (int i = 0; i < emoji.Length; i++)
+        for (var i = 0; i < emoji.Length; i++)
         {
             if (char.IsSurrogatePair(emoji, i))
             {
-                int codePoint = char.ConvertToUtf32(emoji, i);
-                string name = GetEmojiDescription(codePoint);
+                var codePoint = char.ConvertToUtf32(emoji, i);
+                var name = GetEmojiDescription(codePoint);
                 if (!string.IsNullOrEmpty(name))
                 {
                     parts.UnionWith(SplitAndCleanName(name));
@@ -26,7 +26,7 @@ public static class EmojiHelper
             }
             else
             {
-                string name = GetEmojiDescription(emoji[i]);
+                var name = GetEmojiDescription(emoji[i]);
                 if (!string.IsNullOrEmpty(name))
                 {
                     parts.UnionWith(SplitAndCleanName(name));
@@ -38,7 +38,7 @@ public static class EmojiHelper
     }
     private static string GetEmojiDescription(int codePoint)
     {
-        UnicodeCategory category = char.GetUnicodeCategory(char.ConvertFromUtf32(codePoint)[0]);
+        var category = char.GetUnicodeCategory(char.ConvertFromUtf32(codePoint)[0]);
         if (category == UnicodeCategory.OtherSymbol || category == UnicodeCategory.OtherNotAssigned)
         {
             return $"U+{codePoint:X4}";

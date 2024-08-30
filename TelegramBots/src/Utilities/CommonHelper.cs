@@ -5,7 +5,7 @@ public class CommonHelper
     public static string GetLastPartOfUrl(string url)
     {
         // 查找最后一个斜杠的位置
-        int lastSlashIndex = url.LastIndexOf('/');
+        var lastSlashIndex = url.LastIndexOf('/');
     
         // 如果找到了斜杠，返回斜杠后面的所有字符
         if (lastSlashIndex != -1 && lastSlashIndex < url.Length - 1)

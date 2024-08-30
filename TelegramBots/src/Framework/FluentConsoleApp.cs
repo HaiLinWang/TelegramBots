@@ -27,7 +27,8 @@ namespace TelegramBots.Framework
 
             builder.InitializeConfiguration()
                 .InitializeLogging()
-                .RegisterServices().AddTelegramBot();
+                .RegisterServices()
+                .AddTelegramBot();
             return builder;
         }
 

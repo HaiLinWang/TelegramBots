@@ -47,10 +47,10 @@ public class FormatConvert
     /// </summary>
     /// <param name="folder"></param>
     /// <param name="type">0文件夹，1单个文件</param>
-    public async Task ProcessConvertFilesAsync(string folder, int type = 0)
+    public async Task<string> ProcessConvertFilesAsync(string folder, int type = 0)
     {
         // 创建对应的gif文件夹
-        string gifFolder = Path.Combine(Path.GetDirectoryName(folder), "gifs");
+        var gifFolder = Path.Combine(Path.GetDirectoryName(folder), "gifs");
         // 如果 gif 文件夹不存在，则创建
         if (!Directory.Exists(gifFolder))
         {
@@ -73,7 +73,7 @@ public class FormatConvert
         if (!allFiles.Any())
         {
             _logger.LogInformation($"在 {folder} 中没有找到任何文件。");
-            return;
+            return string.Empty;
         }
         // 按文件扩展名分组并计数
         var fileGroups = allFiles
@@ -93,7 +93,7 @@ public class FormatConvert
             await semaphore.WaitAsync();
             try
             {
-                string outputFile = Path.Combine(gifFolder, Path.GetFileNameWithoutExtension(file) + ".gif");
+                var outputFile = Path.Combine(gifFolder, Path.GetFileNameWithoutExtension(file) + ".gif");
                 if (!File.Exists(outputFile))
                 {
                     await ConvertWebmToGifAsync(file, outputFile);
@@ -108,6 +108,7 @@ public class FormatConvert
                 semaphore.Release();
             }
         }));
+        return gifFolder;
     }
 
     // 将单个webm文件转换为gif的方法
@@ -129,10 +130,10 @@ public class FormatConvert
             throw new PlatformNotSupportedException("不支持的操作系统");
         }
 
-        string arguments =
+        var arguments =
             $"-y -i \"{inputFile}\" -vf \"fps=fps=60:round=up,scale='min(320,iw)':'-1':flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" -loop 0 \"{outputFile}\"";
 
-        ProcessStartInfo startInfo = new ProcessStartInfo
+        var startInfo = new ProcessStartInfo
         {
             FileName = ffmpegPath,
             Arguments = arguments,
@@ -147,7 +148,7 @@ public class FormatConvert
             {
                 process.Start();
                 // 读取错误输出
-                string error = await process.StandardError.ReadToEndAsync();
+                var error = await process.StandardError.ReadToEndAsync();
                 await process.WaitForExitAsync();
                 if (process.ExitCode == 0)
                 {

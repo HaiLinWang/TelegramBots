@@ -8,7 +8,7 @@ using TelegramBots.Utilities;
 
 var builder = FluentConsoleApp.CreateBuilder(args);
 var app = builder.Build();
-await app.Services.BuildServiceProvider().ValidateStickerDownloaderAsync();
+await app.Services.BuildServiceProvider().InitializeAsync();
 await app.Run<MainService>();
 
 Console.Read();
